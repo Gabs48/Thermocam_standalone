@@ -19,6 +19,9 @@ Thermocam::Thermocam()
 	lDeviceInfo = NULL;
 	lWidth = 0;
 	lHeight = 0;
+	imgNum = 0;
+	tslast = 0;
+	timestamps = "timestampThermo.txt";
 }
 
 Thermocam::~Thermocam()
@@ -167,16 +170,25 @@ int Thermocam::init()
 	// Start the stream
 	startStream();
 
+	// Create a new timestamp file
+	tsfile.open(timestamps.c_str());
+	if (tsfile.is_open())
+		tsfile<<endl<<endl<<"######################### NEW SESSION #######################"<<endl<<endl;
+
 	return 0;	
 }
 
 int Thermocam::capture(Mat& img, TimeStamp& ts)
 {
+
 	// Buffer and images allocations
 	this->lBuffer = NULL;
 	this->lImage = NULL;
 	PvResult lOperationResult;
 	Mat rawlImage(cv::Size(lWidth, lHeight), CV_8U);
+
+	// Start timestamp
+	ts.start();
 
 	// Get the buffer
 	PvResult lResult = this->lStream.RetrieveBuffer(&this->lBuffer, &lOperationResult, 1000);
@@ -197,4 +209,52 @@ int Thermocam::capture(Mat& img, TimeStamp& ts)
 		cout << "Timeout" << endl;
 		return -1;
 	}
+
+	// Stop timestamp
+	ts.stop();
+}
+
+int Thermocam::captureAndSave()
+{
+	// Create variables to save
+	TimeStamp ts;
+	Mat irImg;
+	
+	// Capture images
+	this->capture(irImg, ts);
+	
+	//Save jpg images
+	mkdir(DIRECTORY, 0777);
+	stringstream ss;
+	string name = "thermo";
+	string type = ".png";
+	ss<<DIRECTORY<<"/"<<name<<imgNum<<type;
+	string filename = ss.str();
+	ss.str("");
+	
+	try {
+		imwrite(filename, irImg);
+	} catch (int ex) {
+		ERROR<<"Exception converting image to png format: "<<ex<<endl;
+		return -1;
+	}
+	
+	// Save time stamp
+	if (!tsfile.is_open()) {
+		tsfile.open(timestamps.c_str());
+		if (!tsfile.is_open()) {
+			ERROR<<"Impossible to open the file"<<endl;
+			return -1;
+		}
+	}
+	if (imgNum==0)
+		INFO<<"Saving image files into folder "<<DIRECTORY<<endl;
+	tsfile<<"IMAGENUM\t"<<imgNum<<"\tPROCTIME\t"<<ts.getProcTime()<<"\tMEANTIME\t"<<ts.getMeanTime()<<"\tDIFF\t"<<ts.getMeanTime()-tslast<<endl;
+
+	imgNum++;
+	tslast = ts.getMeanTime();
+	
+	return 0;
+
+
 }

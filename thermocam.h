@@ -54,7 +54,7 @@
 
 // Thermocam defines
 #define BUFFER_COUNT (16)
-#define DIRECTORY "img"
+#define DIRECTORY "/home/goggles/img"
 
 using namespace std;
 using namespace cv;
@@ -69,7 +69,7 @@ class Thermocam {
 		int init();
 		void close();
 		int capture(Mat& img, TimeStamp& ts);
-
+		int captureAndSave();
 
 	private:
 		// Camera variables
@@ -92,6 +92,12 @@ class Thermocam {
 		PvBuffer *lBuffer;
 		PvImage *lImage;
 		PvInt64 lWidth, lHeight;
+
+		// File save parameters
+		ofstream tsfile;
+		string timestamps;
+		int imgNum;
+		int tslast;
 
 		// Private functions
 		int listCam();

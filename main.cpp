@@ -49,26 +49,10 @@ int main(int argc, char **argv) {
 
 	while(true) {
 
-		// Capture and show image
-		TimeStamp ts;
-		Mat img;
-		thermo.capture(img, ts);
-		imshow("Thermo Image", img);
+		// Capture and save image
+		thermo.captureAndSave();
 		
-		// Handle pause/unpause and ESC
-		int c = cvWaitKey(1);
-		if(c == 'p') {
-			DEBUG<<"Acquisition is now paused"<<endl;
-			c = 0;
-			while(c != 'p' && c != 27){
-				c = cvWaitKey(250);
-			}
-			DEBUG<<"Acquisition is now unpaused"<<endl;
-		}
-		if(c == 27) {
-			DEBUG<<"Acquisition has been stopped by user"<<endl;
-			break;
-		}
+		usleep(100000);
 
 	}
 	

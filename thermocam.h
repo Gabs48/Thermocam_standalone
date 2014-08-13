@@ -31,6 +31,7 @@
 #include <PvBufferWriter.h>
 #include <PvBufferConverter.h>
 #include <PvSystem.h>
+#include <PvPipeline.h>
 
 // Common libs
 #include <stdint.h>
@@ -73,25 +74,31 @@ class Thermocam {
 
 	private:
 		// Camera variables
-		PvResult lResult;
-		PvDeviceInfo *lDeviceInfo;
 		PvSystem lSystem;
-		PvUInt32 lInterfaceCount;
 		PvDevice lDevice;
+		PvStream lStream;
+		PvPipeline *lPipeline;
+		PvImage *lImage;
+		
+		PvDeviceInfo *lDeviceInfo;
 		PvGenParameterArray *lDeviceParams;
+		PvGenParameterArray *lStreamParams;
+
+		PvResult lResult;
+		PvUInt32 lInterfaceCount;
+		
 		PvGenInteger *lPayloadSize;
 		PvGenCommand *lStart;
 		PvGenCommand *lStop;
-		PvGenParameterArray *lStreamParams;
-		PvGenInteger *lCount;
-		PvGenFloat *lFrameRate;
-		PvGenFloat *lBandwidth;
-		PvGenCommand *lResetTimestamp;
-		PvStream lStream;
-		PvBuffer *lBuffers;
-		PvBuffer *lBuffer;
-		PvImage *lImage;
+		PvGenCommand *lTimeStamp;
+
+		PvInt64 lCountVal;
+		double lFrameRateVal;
+		double lBandwidthVal;
+
+		PvInt64 lSize;
 		PvInt64 lWidth, lHeight;
+		
 
 		// File save parameters
 		ofstream tsfile;
@@ -102,7 +109,7 @@ class Thermocam {
 		// Private functions
 		int listCam();
 		int connect();
-		void startStream();
+		int startPipeline();
 };
 
 #endif

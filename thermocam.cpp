@@ -16,12 +16,15 @@ using namespace cv;
 
 Thermocam::Thermocam()
 {
-	lDeviceInfo = NULL;
-	lWidth = 0;
-	lHeight = 0;
-	imgNum = 0;
-	tslast = 0;
-	timestamps = "timestampThermo.txt";
+	this->lDeviceInfo = NULL;
+	this->lCountVal = 0;
+	this->lFrameRateVal = 0.0;
+	this->lBandwidthVal = 0.0;
+	this->lWidth = 0;
+	this->lHeight = 0;
+	this->imgNum = 0;
+	this->tslast = 0;
+	this->timestamps = "timestampThermo.txt";
 }
 
 Thermocam::~Thermocam()
@@ -33,7 +36,7 @@ int Thermocam::listCam()
 	this->lResult = this->lSystem.Find();
 	if( !lResult.IsOK() ) //search for ThermoCam
 	{
-		cout << "PvSystem::Find Error: " << lResult.GetCodeString().GetAscii();
+		INFO << "PvSystem::Find Error: " << lResult.GetCodeString().GetAscii();
 		return -1;
 	}
 	this->lInterfaceCount = this->lSystem.GetInterfaceCount();
@@ -41,15 +44,14 @@ int Thermocam::listCam()
 	for(PvUInt32 x = 0; x < this->lInterfaceCount; x++)
 	{
 		PvInterface * lInterface = lSystem.GetInterface(x);
-		cout << "Ethernet Interface " << endl;
-		cout << "IP Address: " << lInterface->GetIPAddress().GetAscii() << endl;
-		cout << "Subnet Mask: " << lInterface->GetSubnetMask().GetAscii() << endl << endl;
+		INFO << "Ethernet Interface " << endl;
+		INFO << "IP Address: " << lInterface->GetIPAddress().GetAscii() << endl;
+		INFO << "Subnet Mask: " << lInterface->GetSubnetMask().GetAscii() << endl << endl;
 		PvUInt32 lDeviceCount = lInterface->GetDeviceCount();
 		for(PvUInt32 y = 0; y < lDeviceCount ; y++)
 		{
 			this->lDeviceInfo = lInterface->GetDeviceInfo(y);
-			cout << "ThermoCam " << endl;
-			cout << "IP Address: " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
+			INFO << "Thermocam with IP Address: " << this->lDeviceInfo->GetIPAddress().GetAscii() << " found!"<<endl;
 		}
 	}
 
@@ -58,105 +60,90 @@ int Thermocam::listCam()
 
 int Thermocam::connect()
 {
-	if(this->lDeviceInfo != NULL)
-	{
-		cout << "Connecting to " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
-		this->lResult = this->lDevice.Connect(this->lDeviceInfo); // connect to ThermoCam
-		if ( !lResult.IsOK() ) {
-			cout << "Unable to connect to " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
-			return -2;
-		} else {
-			cout << "Successfully connected to " << lDeviceInfo->GetIPAddress().GetAscii() << endl;
-    			this->lDeviceParams = this->lDevice.GetGenParameters();
-    			this->lPayloadSize = dynamic_cast<PvGenInteger *>(lDeviceParams->Get("PayloadSize"));
-    			this->lStart = dynamic_cast<PvGenCommand *>(lDeviceParams->Get("AcquisitionStart"));
-    			this->lStop = dynamic_cast<PvGenCommand *>(lDeviceParams->Get("AcquisitionStop"));
-    			this->lDevice.NegotiatePacketSize();
-			return 0;
+	if (this->lDeviceInfo != NULL) {
+		INFO << "Connecting to thermocam: " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
+		if ( !this->lDevice.Connect( this->lDeviceInfo ).IsOK() ) {
+		ERROR << "Unable to connect to " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
+		return -2;
 		}
+		INFO << "Successfully connected to thermocam: " << this->lDeviceInfo->GetIPAddress().GetAscii() << endl;
 	} else {
-		cout << "No device found" << endl;
+		ERROR << "No thermocam found" << endl;
 		return -1;
 	}
+	return 0;
 }
 
 
-void Thermocam::startStream()
+int Thermocam::startPipeline()	
 {
-	cout << "Opening stream to ThermoCam" << endl;
+	// Get device parameters need to control streaming
+	this->lDeviceParams = this->lDevice.GetGenParameters();
 
-	// Open the stream
-	this->lStream.Open(lDeviceInfo->GetIPAddress());
+	// Negotiate streaming packet size
+	this->lDevice.NegotiatePacketSize();
 
-	// Read device payload size
-	PvInt64 lSize = 0;
-	this->lPayloadSize->GetValue(lSize);
+	// Open stream - have the PvDevice do it for us
+	INFO << "Opening stream to thermocam" << endl;
+	this->lStream.Open( lDeviceInfo->GetIPAddress() );
 
-	// Set buffer size and count
-	PvUInt32 lBufferCount = (this->lStream.GetQueuedBufferMaximum() < BUFFER_COUNT) ? 
-	this->lStream.GetQueuedBufferMaximum() : 
-	BUFFER_COUNT;
-	this->lBuffers = new PvBuffer[lBufferCount];
-	for (PvUInt32 i = 0; i < lBufferCount; i++) {
-		lBuffers[i].Alloc(static_cast<PvUInt32>(lSize));
-	}
+	// Create the PvPipeline object
+	this->lPipeline = new PvPipeline( &lStream );
 
-	// Set device IP destination to the stream
-	this->lDevice.SetStreamDestination(this->lStream.GetLocalIPAddress(), this->lStream.GetLocalPort()); 
+	// Reading payload size from device
+	this->lDeviceParams->GetIntegerValue( "PayloadSize", this->lSize );
 
-	// Get stream parameters
+	// Set the Buffer size and the Buffer count
+	this->lPipeline->SetBufferSize( static_cast<PvUInt32>( this->lSize ) );
+	this->lPipeline->SetBufferCount( 16 ); 
+
+	// Have to set the Device IP destination to the Stream
+	this->lDevice.SetStreamDestination( this->lStream.GetLocalIPAddress(), this->lStream.GetLocalPort() );
+
+	// Start pipeline
+	INFO << "Starting thermocam pipeline" << endl;
+	this->lPipeline->Start();
+
+	// Get stream parameters/stats
 	this->lStreamParams = this->lStream.GetParameters();
-	this->lCount = dynamic_cast<PvGenInteger *>(this->lStreamParams->Get("ImagesCount"));
-	this->lFrameRate = dynamic_cast<PvGenFloat *>(this->lStreamParams->Get("AcquisitionRate"));
-	this->lBandwidth = dynamic_cast<PvGenFloat *>(this->lStreamParams->Get("Bandwidth"));
-	for (PvUInt32 i = 0; i < lBufferCount; i++) {
-		this->lStream.QueueBuffer(lBuffers + i);
-	}
-	this->lResetTimestamp = dynamic_cast<PvGenCommand *>(lDeviceParams->Get("GevTimestampControlReset"));
-	this->lResetTimestamp->Execute();
-	
-	// Start the stream
-	cout << "Sending StartAcquisition command to ThermoCam" << endl;
-	this->lResult = this->lStart->Execute();
 
-	// Get size parameters			
-	this->lDeviceParams->GetIntegerValue("Width", this->lWidth);
-	this->lDeviceParams->GetIntegerValue("Height", this->lHeight);
+	// TLParamsLocked is optional but when present, it MUST be set to 1
+	this->lDeviceParams->SetIntegerValue( "TLParamsLocked", 1 );
 
-}			
+	INFO << "Resetting thermocam timestamp counter..." << endl;
+	this->lDeviceParams->ExecuteCommand( "GevTimestampControlReset" );
+
+	// Start acquisition
+	INFO << "Sending StartAcquisition command to thermocam" << endl;
+	this->lDeviceParams->ExecuteCommand( "AcquisitionStart" );
+
+}		
 
 void Thermocam::close()
 {
-	cout << "Sending AcquisitionStop command to ThermoCam" << endl;
+	INFO << "Sending AcquisitionStop command to thermocam" << endl;
 
 	// Stop the stream
 	this->lStop->Execute();
 
-	// Empty and close the buffers
-	this->lStream.AbortQueuedBuffers();
-	while (this->lStream.GetQueuedBufferCount() > 0) {
-		PvBuffer *lBuffer = NULL;
-		PvResult lOperationResult;
-	        lStream.RetrieveBuffer(&lBuffer, &lOperationResult);
-	}
-	cout << "Releasing buffers" << endl;
-	delete []this->lBuffers; 
+	// If present reset TLParamsLocked to 0 after streaming stop
+	this->lDeviceParams->SetIntegerValue( "TLParamsLocked", 0 );
+
+	// Close the pipeline
+	INFO << "Stop thermocam pipeline" << endl;
+	this->lPipeline->Stop();
 
 	// Close the stream
-	cout << "Closing stream" << endl;
+	INFO << "Closing thermocam stream" << endl;
 	this->lStream.Close(); 
 	
 	// Close the device
-	cout << "Disconnecting ThermoCam" << endl;
+	INFO << "Disconnecting thermocam" << endl;
 	this->lDevice.Disconnect();
 }
 
 int Thermocam::init()
 {	
-	// Init
-   	cout << "Connecting to and streaming data from ThermoCam" << endl;
-	printf("pid %d\n", (int) getpid());  
-
 	// Get connected devices list
 	int retVal = this->listCam();
 	if(retVal!=0)
@@ -167,8 +154,8 @@ int Thermocam::init()
 	if(retVal!=0)
 		return -1;
 
-	// Start the stream
-	startStream();
+	// Start the pipeline
+	startPipeline();
 
 	// Create a new timestamp file
 	tsfile.open(timestamps.c_str());
@@ -180,38 +167,41 @@ int Thermocam::init()
 
 int Thermocam::capture(Mat& img, TimeStamp& ts)
 {
-
-	// Buffer and images allocations
-	this->lBuffer = NULL;
-	this->lImage = NULL;
-	PvResult lOperationResult;
-	Mat rawlImage(cv::Size(lWidth, lHeight), CV_8U);
-
 	// Start timestamp
 	ts.start();
 
-	// Get the buffer
-	PvResult lResult = this->lStream.RetrieveBuffer(&this->lBuffer, &lOperationResult, 1000);
+	// Retrieve next buffer		
+        PvBuffer *lBuffer = NULL;
+        PvResult  lOperationResult;
+        lResult = lPipeline->RetrieveNextBuffer( &lBuffer, 5000, &lOperationResult );
+        
 
-	// Check the buffer and fill image
-	if (lResult.IsOK()) {
-		if(lOperationResult.IsOK()) {
-			if (this->lBuffer->GetPayloadType() == PvPayloadTypeImage) {
-				this->lImage=this->lBuffer->GetImage();
-				this->lBuffer->GetImage()->Alloc(lImage->GetWidth(), lImage->GetHeight(), PvPixelMono8);
+	if ( lResult.IsOK() ) {
+		if ( lOperationResult.IsOK() ) {
+
+			lStreamParams->GetIntegerValue( "ImagesCount", lCountVal );
+			lStreamParams->GetFloatValue( "AcquisitionRateAverage", lFrameRateVal );
+			lStreamParams->GetFloatValue( "BandwidthAverage", lBandwidthVal );
+
+			PvUInt32 lWidth = 0, lHeight = 0;
+			if ( lBuffer->GetPayloadType() == PvPayloadTypeImage ) {
+				PvImage *lImage = lBuffer->GetImage();
+				lWidth = lBuffer->GetImage()->GetWidth();
+				lHeight = lBuffer->GetImage()->GetHeight();
+				Mat rawlImage(Size(lWidth, lHeight), CV_8U, lBuffer->GetDataPointer());
+				img = rawlImage;
 			}
 		}
-		this->lImage->Attach(rawlImage.data, lImage->GetWidth(), lImage->GetHeight(), PvPixelMono8);
-		this->lStream.QueueBuffer(lBuffer);
-		img = rawlImage;
-		return 0;
+		lPipeline->ReleaseBuffer( lBuffer );	
 	} else {
-		cout << "Timeout" << endl;
+		ERROR << "Thermocam acquisition timeout"<<endl;
 		return -1;
 	}
 
 	// Stop timestamp
 	ts.stop();
+
+	return 0;
 }
 
 int Thermocam::captureAndSave()
